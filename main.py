@@ -30,3 +30,4 @@ if token:
     client.run(token)
 else:
     print("No Token! Add DISCORD_TOKEN in Render Environment")
+    
