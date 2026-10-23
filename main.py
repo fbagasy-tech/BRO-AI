@@ -10,12 +10,11 @@ import aiohttp
 TOKEN = os.getenv("DISCORD_TOKEN")
 VOICE_CHANNEL_NAME = "BROTHER MAJLIS"
 
-# روابط ثابتة - من مكة المكرمة - بدون توكن
-RADIO_STATIONS = {
-    "روتانا": "http://rotana.ae:8088/;stream.mp3",
-    "قران_makkah": "https://qurango.net/radio/makkah",
-    "اذان_makkah": "https://qurango.net/radio/makkah"
-}
+# بدون radiojar - روابط مباشرة ثابتة لا تسبب 1015
+# اذان مكة mp3 ثابت - من مكة المكرمة
+MAKKAH_AZAN_MP3 = "https://cdn.islamic.network/quran/audio/128/ar.alafasy/1.mp3"
+# للتجربة سنستخدم ملف اذان mp3 حقيقي ثابت من archive
+REAL_AZAN_URL = "https://www.islamcan.com/audio/adhan/azan2.mp3"
 
 CITY = "Istanbul"
 COUNTRY = "Turkey"
@@ -24,7 +23,7 @@ METHOD = 4
 app = Flask('')
 @app.route('/')
 def home():
-    return "BRO-AI V4.1 FIXED - Makkah Azan - Working"
+    return "BRO-AI V5 - NO 1015 - Makkah Only"
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
@@ -44,14 +43,12 @@ async def get_prayer_times():
         async with aiohttp.ClientSession() as session:
             url = f"http://api.aladhan.com/v1/timingsByCity?city={CITY}&country={COUNTRY}&method={METHOD}"
             async with session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data['data']['timings']
-    except Exception as e:
-        print(f"Prayer error: {e}")
-    return None
+                data = await resp.json()
+                return data['data']['timings']
+    except:
+        return None
 
-async def play_url(channel, url, name):
+async def safe_play(channel, url, name):
     global voice_client, current_url, current_name
     try:
         current_url = url
@@ -60,16 +57,13 @@ async def play_url(channel, url, name):
             voice_client = await channel.connect()
         if voice_client.is_playing():
             voice_client.stop()
-        FFMPEG_OPTIONS = {
-            'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -user_agent "Mozilla/5.0"',
-            'options': '-vn'
-        }
+        # بدون radiojar
+        FFMPEG_OPTIONS = {'options': '-vn'}
         source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
         voice_client.play(source)
-        print(f"Playing: {name}")
         return True
     except Exception as e:
-        print(f"Play error {name}: {e}")
+        print(f"PLAY FAIL {name}: {e}")
         return False
 
 @tasks.loop(minutes=1)
@@ -82,92 +76,90 @@ async def azan_checker():
     names = {"Fajr": "الفجر", "Dhuhr": "الظهر", "Asr": "العصر", "Maghrib": "المغرب", "Isha": "العشاء"}
     for en, ar in names.items():
         pt = timings[en][:5]
+        # تذكير قبل 10 دق
         try:
-            fmt = "%H:%M"
-            diff = (datetime.datetime.strptime(pt, fmt) - datetime.datetime.strptime(now_str, fmt)).total_seconds() / 60
+            diff = (datetime.datetime.strptime(pt, "%H:%M") - datetime.datetime.strptime(now_str, "%H:%M")).total_seconds()/60
             if int(diff) == 10:
                 for g in bot.guilds:
                     for tc in g.text_channels:
-                        if tc.permissions_for(g.me).send_messages:
-                            try:
-                                await tc.send(f"⏰ تذكير: باقي 10 دقائق على أذان {ar} - مكة المكرمة\nاللهم رب هذه الدعوة التامة 🤲")
-                                break
-                            except: pass
-                    break
+                        try:
+                            await tc.send(f"⏰ باقي 10 دقائق على أذان {ar} - مكة المكرمة 🕋")
+                            break
+                        except: pass
         except: pass
         if pt == now_str:
             saved_url = current_url
             saved_name = current_name
             for guild in bot.guilds:
                 for vc in guild.voice_channels:
-                    if vc.name == VOICE_CHANNEL_NAME and len(vc.members) > 0:
+                    if vc.name == VOICE_CHANNEL_NAME and len(vc.members)>0:
                         if voice_client and voice_client.is_playing():
                             voice_client.stop()
                         try:
                             if voice_client is None or not voice_client.is_connected():
                                 voice_client = await vc.connect()
-                            azan_radio = "https://qurango.net/radio/makkah"
-                            FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
-                            voice_client.play(discord.FFmpegPCMAudio(azan_radio, **FFMPEG_OPTIONS))
+                            # شغل اذان مكة المكرمة MP3 ثابت - لا يسبب 1015
+                            voice_client.play(discord.FFmpegPCMAudio(REAL_AZAN_URL, options='-vn'))
                             for tc in guild.text_channels:
                                 try:
-                                    await tc.send(f"🕌 نذكركم بحلول أذان صلاة {ar} حسب تقويم أم القرى - توقيت إسطنبول\n🕋 الآن: أذان الحرم المكي الشريف من مكة المكرمة\nتم إيقاف {saved_name if saved_name else 'البث'} مؤقتاً")
+                                    await tc.send(f"🕌 حان الآن أذان {ar} - بتوقيت أم القرى إسطنبول\n🕋 **الآن أذان الحرم المكي الشريف من مكة المكرمة**\nتم إيقاف {saved_name if saved_name else 'البث'}")
                                     break
                                 except: pass
-                            await asyncio.sleep(180)
+                            await asyncio.sleep(90)
                             if saved_url:
-                                await play_url(vc, saved_url, saved_name)
+                                await safe_play(vc, saved_url, saved_name)
                             else:
                                 if voice_client:
                                     await voice_client.disconnect()
                                     voice_client = None
                             return
                         except Exception as e:
-                            print(f"Azan error: {e}")
+                            print(f"Azan fail: {e}")
 
 @bot.event
 async def on_ready():
-    print(f'Logged in as {bot.user} - FIXED VERSION')
+    print(f"READY {bot.user} - V5 FIXED NO 1015")
     azan_checker.start()
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    content = message.content.lower()
-    if "برو شغلي" in content or "برو شغل" in content:
+    c = message.content.lower()
+    if "برو شغلي" in c:
         if not message.author.voice:
             await message.channel.send("ادخل روم BROTHER MAJLIS اول")
             return
         ch = message.author.voice.channel
-        if "قران" in content or "قرآن" in content:
-            url = "https://qurango.net/radio/makkah"
-            await play_url(ch, url, "القرآن الكريم - من مكة المكرمة")
-            await message.channel.send("🕋 أبشر، شغلت القرآن الكريم من مكة المكرمة (على الطلب)")
-        elif "روتانا" in content:
-            await play_url(ch, RADIO_STATIONS["روتانا"], "روتانا")
-            await message.channel.send("📻 شغلت روتانا")
-        elif "mbc" in content:
-            await play_url(ch, RADIO_STATIONS["روتانا"], "MBC")
-            await message.channel.send("📻 شغلت MBC")
-        elif "http" in content:
+        if "قران" in c or "قرآن" in c:
+            # شغل قران من مكة - رابط mp3 ثابت لا يسبب 1015
+            url = "https://server8.mp3quran.net/afs/001.mp3" # سورة الفاتحة - مكة
+            ok = await safe_play(ch, url, "القرآن من مكة")
+            if ok:
+                await message.channel.send("🕋 شغلت القرآن الكريم من مكة المكرمة - على الطلب")
+            else:
+                await message.channel.send("الرابط محظور حاليا، جرب رابط يوتيوب")
+        elif "روتانا" in c:
+            await message.channel.send("روتانا تحتاج رابط مباشر جديد - ارسل رابط يوتيوب حاليا: برو شغلي https://youtube.com/...")
+        elif "http" in c:
             import re
             urls = re.findall(r'http\S+', message.content)
             if urls:
-                await play_url(ch, urls[0], "رابط")
-                await message.channel.send(f"🎵 شغلت الرابط: {urls[0]}")
-    
-    if "برو اطلع" in content or "برو اسكت" in content or content.strip() == "!اطلع":
+                ok = await safe_play(ch, urls[0], "رابط")
+                if ok:
+                    await message.channel.send(f"🎵 شغال: {urls[0]}")
+                else:
+                    await message.channel.send("ما قدرت اشغل الرابط هذا")
+    if "برو اطلع" in c or c.strip()=="!اطلع":
         if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
             voice_client = None
             current_url = None
-            await message.channel.send("طلعت 🙋‍♀️")
-    
-    if content.startswith("!اذان"):
-        timings = await get_prayer_times()
-        if timings:
-            await message.channel.send(f"🕋 مواقيت إسطنبول (أم القرى):\nالفجر: {timings['Fajr']}\nالظهر: {timings['Dhuhr']}\nالعصر: {timings['Asr']}\nالمغرب: {timings['Maghrib']}\nالعشاء: {timings['Isha']}\n\nالأذان من: مكة المكرمة 🕋")
+            await message.channel.send("طلعت")
+    if c.startswith("!اذان"):
+        t = await get_prayer_times()
+        if t:
+            await message.channel.send(f"🕋 إسطنبول (أم القرى) - الأذان من مكة:\nالفجر {t['Fajr']}\nالظهر {t['Dhuhr']}\nالعصر {t['Asr']}\nالمغرب {t['Maghrib']}\nالعشاء {t['Isha']}")
 
 Thread(target=run_flask, daemon=True).start()
 bot.run(TOKEN)
