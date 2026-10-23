@@ -1,19 +1,32 @@
-import discord, os
-from discord.ext import commands
+import discord
+import os
+from threading import Thread
+from flask import Flask
 
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="!", intents=intents)
+# عشان Render ما يفصل
+app = Flask('')
+@app.route('/')
+def home(): return "BRO-AI is Online!"
+def run(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+Thread(target=run, daemon=True).start()
 
-@bot.event
+# كود البوت
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
+
+@client.event
 async def on_ready():
-    print(f"BRO AI ONLINE {bot.user}")
+    print(f'Logged in as {client.user}')
 
-@bot.event
-async def on_message(msg):
-    if msg.author.bot:
-        return
-    if "برو" in msg.content.lower() or bot.user in msg.mentions:
-        await msg.channel.send(f"هلا {msg.author.display_name} 👋 أنا BRO AI شغال")
-    await bot.process_commands(msg)
+@client.event
+async def on_message(message):
+    if message.author == client.user: return
+    if message.content.lower() == "ping":
+        await message.channel.send("Pong! BRO-AI Online!")
 
-bot.run(os.getenv("TOKEN"))
+token = os.environ.get("DISCORD_TOKEN")
+if token:
+    client.run(token)
+else:
+    print("No Token! Add DISCORD_TOKEN in Render Environment")
